@@ -100,6 +100,7 @@ addEventListener("keydown", (e) => {
   const i = items.indexOf(document.activeElement);
   if (e.key === "ArrowDown" || e.key === "ArrowRight") { if (inInput && e.key === "ArrowRight") return; e.preventDefault(); items[(i + 1) % items.length]?.focus(); }
   else if (e.key === "ArrowUp" || e.key === "ArrowLeft") { if (inInput && e.key === "ArrowLeft") return; e.preventDefault(); items[(i - 1 + items.length) % items.length]?.focus(); }
+  else if ((e.key === "Enter" || e.key === " ") && !inInput && document.activeElement && document.activeElement.tagName === "BUTTON") { e.preventDefault(); document.activeElement.click(); }
   else if ((e.key === "Escape" || e.key === "Backspace") && !inInput && backFn) { e.preventDefault(); backFn(); }
 });
 const visLog = [];
@@ -128,7 +129,7 @@ function home() {
 }
 
 // ---------- GATES (P0) ----------
-const BUILD = "p0-2026-10-29c";
+const BUILD = "p0-2026-10-29d";
 async function gates() {
   backFn = home;
   const rows = []; const res = { build: BUILD, boot: boot.n, install: boot.id };
@@ -237,7 +238,7 @@ async function card(id) {
 
 // ---------- boot ----------
 try { if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {}); } catch {}
-if (Q.get("gates") === "1") gates(); else home();
+if (Q.get("gates") === "1") gates(); else if (!store.get("xg.token")) pair(); else home();
 </script>
 </body>
 </html>
