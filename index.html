@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>xFix Glasses</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="mrbd-web-app-capable" content="yes">
+<meta name="color-scheme" content="dark">
+<style>
+  :root { --fg:#fff; --dim:#9aa4ad; --acc:#4cc3ff; --warn:#ffb020; --ok:#4cd98a; --bad:#ff6b6b; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; width:100%; height:100%; background:#000; color:var(--fg); overflow:hidden;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  #app { width:100%; height:100%; padding:14px 18px; display:flex; flex-direction:column; gap:10px; }
+  h1 { font-size:30px; margin:0; line-height:1.15; font-weight:700; }
+  h2 { font-size:26px; margin:0; line-height:1.2; font-weight:600; }
+  .sub { color:var(--dim); font-size:22px; }
+  .body { flex:1; overflow:hidden; display:flex; flex-direction:column; gap:10px; min-height:0; }
+  .txt { font-size:30px; line-height:1.25; }
+  .small { font-size:22px; line-height:1.25; color:var(--dim); }
+  .tip { font-size:24px; line-height:1.25; color:#cfe9ff; }
+  .chip { display:inline-block; font-size:24px; padding:3px 12px; border:2px solid var(--acc); border-radius:999px; color:var(--acc); }
+  .chip.warn { border-color:var(--warn); color:var(--warn); }
+  .prov { font-size:20px; color:var(--warn); letter-spacing:.02em; }
+  .bar { display:flex; gap:8px; }
+  button { font:inherit; font-size:26px; color:var(--fg); background:#15191d; border:2px solid #3a434b; border-radius:12px;
+    padding:8px 14px; min-height:54px; flex:1; }
+  button:focus, button.focus { outline:4px solid var(--acc); outline-offset:1px; background:#0b2a3b; }
+  .list button { display:block; width:100%; text-align:left; margin-bottom:8px; }
+  .code { font-size:84px; letter-spacing:.12em; font-weight:800; color:var(--acc); text-align:center; font-family: ui-monospace, Menlo, Consolas, monospace; }
+  table { border-collapse:collapse; width:100%; font-size:22px; }
+  td { padding:3px 6px; border-bottom:1px solid #222; vertical-align:top; }
+  .ok { color:var(--ok); } .bad { color:var(--bad); } .w { color:var(--warn); }
+  input.t { width:100%; font-size:26px; padding:8px; background:#111; color:#fff; border:2px solid #3a434b; border-radius:10px; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+"use strict";
+const API = "https://bjcejlagkrtrtxipdcwb.supabase.co/functions/v1/glasses-api";
+const CONFIRM_URL = new URL("confirm.html", location.href).href.replace(/^https?:\/\//, "");
+const Q = new URLSearchParams(location.search);
+const LANG = ["en","fr","cs","es","de","it"].includes(Q.get("lang")) ? Q.get("lang") : "en";
+const NATIVE_NAV = Q.get("native") === "1";   // A/B: let the glasses' own spatial navigation drive focus
+
+// ---------- safe storage ----------
+const store = {
+  get(k) { try { return localStorage.getItem(k); } catch { return null; } },
+  set(k, v) { try { localStorage.setItem(k, v); return true; } catch { return false; } },
+  del(k) { try { localStorage.removeItem(k); } catch {} },
+};
+const boot = (() => {
+  let id = store.get("xg.install"), created = store.get("xg.created"), n = Number(store.get("xg.boots") || 0);
+  if (!id) { id = Math.random().toString(36).slice(2, 8); created = String(Date.now()); store.set("xg.install", id); store.set("xg.created", created); }
+  n += 1; store.set("xg.boots", String(n));
+  return { id, created: Number(created) || Date.now(), n, persisted: store.get("xg.install") === id };
+})();
+
+// ---------- api ----------
+async function api(action, extra = {}, timeoutMs = 20000) {
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), timeoutMs);
+  try {
+    const r = await fetch(API, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, lang: LANG, ...extra }), signal: ctl.signal });
+    const j = await r.json().catch(() => ({}));
+    return { status: r.status, ...j };
+  } finally { clearTimeout(t); }
+}
+
+// ---------- tiny dom helpers ----------
+const $app = document.getElementById("app");
+function h(tag, attrs = {}, ...kids) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v; else if (k === "on") for (const [ev, fn] of Object.entries(v)) e.addEventListener(ev, fn);
+    else if (v !== false && v != null) e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const k of kids.flat()) if (k != null) e.append(k.nodeType ? k : document.createTextNode(String(k)));
+  return e;
+}
+let backFn = null;
+function screen(title, body, bar, sub) {
+  $app.replaceChildren(
+    h("div", {}, h("h1", {}, title), sub ? h("div", { class: "sub" }, sub) : null),
+    h("div", { class: "body" }, body),
+    bar ? h("div", { class: "bar" }, bar) : null,
+  );
+  const first = $app.querySelector("[data-first]") || $app.querySelector("button, input");
+  if (first) first.focus({ preventScroll: true });
+}
+const btn = (label, fn, first) => h("button", { type: "button", on: { click: fn }, "data-first": first ? "1" : false }, label);
+
+// ---------- keys: own focus nav (disable with ?native=1) ----------
+const keyLog = [];
+addEventListener("keydown", (e) => {
+  keyLog.push(`${e.key}@${Math.round(performance.now())}`); if (keyLog.length > 12) keyLog.shift();
+  if (NATIVE_NAV) return;
+  const inInput = document.activeElement && document.activeElement.tagName === "INPUT";
+  const items = [...$app.querySelectorAll("button, input")];
+  const i = items.indexOf(document.activeElement);
+  if (e.key === "ArrowDown" || e.key === "ArrowRight") { if (inInput && e.key === "ArrowRight") return; e.preventDefault(); items[(i + 1) % items.length]?.focus(); }
+  else if (e.key === "ArrowUp" || e.key === "ArrowLeft") { if (inInput && e.key === "ArrowLeft") return; e.preventDefault(); items[(i - 1 + items.length) % items.length]?.focus(); }
+  else if ((e.key === "Escape" || e.key === "Backspace") && !inInput && backFn) { e.preventDefault(); backFn(); }
+});
+const visLog = [];
+document.addEventListener("visibilitychange", () => visLog.push(`${document.visibilityState}@${Math.round(performance.now() / 1000)}s`));
+
+// ---------- speech ----------
+function speak(text, lang) {
+  try {
+    if (!("speechSynthesis" in window)) return false;
+    speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text);
+    u.lang = ({ en: "en-GB", fr: "fr-FR", cs: "cs-CZ", es: "es-ES", de: "de-DE", it: "it-IT" })[lang || LANG]; speechSynthesis.speak(u); return true;
+  } catch { return false; }
+}
+
+// ---------- HOME ----------
+function home() {
+  backFn = null;
+  const paired = !!store.get("xg.token");
+  screen("xFix Glasses", [
+    h("div", { class: "txt" }, paired ? "Paired. Pick a job." : "Not paired yet."),
+    h("div", { class: "small" }, `build ${BUILD} · lang ${LANG} · boot #${boot.n}`),
+  ], [
+    btn(paired ? "Jobs" : "Pair", paired ? jobs : pair, true),
+    btn("Gates", gates),
+  ]);
+}
+
+// ---------- GATES (P0) ----------
+const BUILD = "p0-2026-10-29b";
+async function gates() {
+  backFn = home;
+  const rows = []; const res = { build: BUILD, boot: boot.n, install: boot.id };
+  const draw = (note) => screen("P0 gates", [
+    h("table", {}, ...rows.map(([k, v, c]) => h("tr", {}, h("td", {}, k), h("td", { class: c || "" }, v)))),
+    note ? h("div", { class: "small" }, note) : null,
+  ], [btn("Speak EN", () => speak("Front brake pads. Step one. Remove the front wheels.", "en")), btn("Speak FR", () => speak("Plaquettes de frein avant. Étape un. Déposer les roues avant.", "fr")), btn("Back", home)]);
+  const add = (k, v, c) => { rows.push([k, v, c]); draw("running…"); };
+  const nav = performance.getEntriesByType("navigation")[0];
+  res.load_ms = nav ? Math.round(nav.loadEventEnd || nav.domContentLoadedEventEnd) : null;
+  add("load", res.load_ms != null ? `${res.load_ms} ms` : "n/a", res.load_ms != null && res.load_ms < 3000 ? "ok" : "w");
+  res.viewport = `${innerWidth}x${innerHeight}@${devicePixelRatio}`; add("viewport", res.viewport);
+  res.storage = boot.persisted; res.boots = boot.n; res.age_min = Math.round((Date.now() - boot.created) / 60000);
+  add("storage", boot.persisted ? `ok · boot #${boot.n} · age ${res.age_min} min` : "FAILED", boot.persisted ? "ok" : "bad");
+  res.sw = "serviceWorker" in navigator; add("service worker", res.sw ? "supported" : "no", res.sw ? "ok" : "w");
+  res.tts = "speechSynthesis" in window;
+  let voices = []; try { voices = speechSynthesis.getVoices().map((v) => v.lang); } catch {}
+  res.voices = [...new Set(voices)].slice(0, 12); add("speech", res.tts ? `yes · ${res.voices.length} voices${res.voices.some((l) => /^fr/i.test(l)) ? " · FR" : ""}` : "NO", res.tts ? "ok" : "bad");
+  // cross-origin API round trips
+  const rtts = []; let corsOk = true;
+  for (let i = 0; i < 5; i++) { const t0 = performance.now(); try { const r = await api("ping", {}, 8000); if (!r.ok) corsOk = false; rtts.push(Math.round(performance.now() - t0)); } catch { corsOk = false; } }
+  rtts.sort((a, b) => a - b); res.rtt_p50 = rtts[Math.floor(rtts.length / 2)] ?? null; res.rtt_max = rtts[rtts.length - 1] ?? null; res.cors = corsOk;
+  add("API ping", corsOk ? `p50 ${res.rtt_p50} ms · max ${res.rtt_max} ms` : "FAILED (CORS/network)", corsOk && res.rtt_p50 < 1500 ? "ok" : "bad");
+  for (const kb of [50, 200]) { const t0 = performance.now(); try { const r = await api("blob", { kb }, 20000); res[`blob${kb}_ms`] = r.ok ? Math.round(performance.now() - t0) : null; } catch { res[`blob${kb}_ms`] = null; }
+    add(`payload ${kb} KB`, res[`blob${kb}_ms`] != null ? `${res[`blob${kb}_ms`]} ms` : "FAILED", res[`blob${kb}_ms`] != null ? "ok" : "bad"); }
+  res.keys = keyLog.slice(); res.vis = visLog.slice(); res.ua = navigator.userAgent.slice(0, 160);
+  add("keys seen", keyLog.length ? keyLog.slice(-4).join(" ") : "none yet — press the band", keyLog.length ? "ok" : "w");
+  try { await api("gatelog", { device: `g-${boot.id}`, payload: res }, 8000); draw("sent to xFix ✓ — press band keys, then Gates again"); } catch { draw("could not send results"); }
+}
+
+// ---------- PAIR ----------
+async function pair() {
+  backFn = home; let stop = false; backFn = () => { stop = true; home(); };
+  screen("Pairing", [h("div", { class: "txt" }, "Contacting xFix…")], [btn("Back", backFn, true)]);
+  let s; try { s = await api("pair_start", { label: `glasses-${boot.id}` }); } catch { s = null; }
+  if (!s || !s.ok) { screen("Pairing", [h("div", { class: "txt bad" }, `Failed (${s ? s.status : "network"})`)], [btn("Retry", pair, true), btn("Back", home)]); return; }
+  screen("Pairing", [h("div", { class: "code" }, s.code), h("div", { class: "small" }, `On your phone open`), h("div", { class: "tip" }, CONFIRM_URL), h("div", { class: "small" }, "enter this code and the pilot PIN.")], [btn("Cancel", backFn, true)]);
+  const t0 = Date.now();
+  while (!stop && Date.now() - t0 < s.ttl_s * 1000) {
+    await new Promise((r) => setTimeout(r, 3000)); if (stop) return;
+    let p; try { p = await api("pair_status", { poll_id: s.poll_id }, 8000); } catch { continue; }
+    if (p.status === "paired" && p.token) { const saved = store.set("xg.token", p.token); screen("Paired ✓", [h("div", { class: "txt" }, saved ? "Token saved." : "Token NOT saved — storage blocked.")], [btn("Jobs", jobs, true)]); return; }
+    if (p.status === "expired") break;
+  }
+  if (!stop) screen("Pairing", [h("div", { class: "txt w" }, "Code expired.")], [btn("Try again", pair, true), btn("Back", home)]);
+}
+
+// ---------- JOBS ----------
+async function jobs() {
+  backFn = home; const token = store.get("xg.token");
+  if (!token) return pair();
+  screen("Jobs", [h("div", { class: "txt" }, "Loading…")], [btn("Back", home, true)]);
+  let r; try { r = await api("jobs", { token }); } catch { r = null; }
+  if (r && r.status === 401) { store.del("xg.token"); return screen("Session ended", [h("div", { class: "txt" }, "Pair again.")], [btn("Pair", pair, true)]); }
+  if (!r || !r.ok) return screen("Jobs", [h("div", { class: "txt w" }, "Offline. Showing saved cards.")], [...savedJobs(), btn("Back", home)]);
+  screen("Jobs", [h("div", { class: "list" }, r.jobs.map((j, i) => h("button", { type: "button", "data-first": i === 0 ? "1" : false, on: { click: () => card(j.id) } }, `${j.vehicle} — ${j.title}${j.status === "ready" ? "" : " …"}`)))], [btn("Back", home)]);
+}
+function savedJobs() { const out = []; for (const id of ["octavia-front-pads", "jeep-front-pads"]) { if (store.get(`xg.card.${id}.${LANG}`)) out.push(btn(`Saved: ${id}`, () => card(id), out.length === 0)); } return out; }
+
+// ---------- CARD VIEWER ----------
+async function card(id) {
+  backFn = jobs; const token = store.get("xg.token"); let stop = false; backFn = () => { stop = true; jobs(); };
+  let c = null, offline = false;
+  screen("Preparing", [h("div", { class: "txt" }, "Fetching the repair card…"), h("div", { class: "small" }, "First time can take ~40 s.")], [btn("Back", backFn, true)]);
+  for (let i = 0; i < 20 && !stop; i++) {
+    let r; try { r = await api("card", { token, job_id: id }, 20000); } catch { r = null; }
+    if (!r) { const s = store.get(`xg.card.${id}.${LANG}`); if (s) { c = JSON.parse(s); offline = true; break; } return screen("Offline", [h("div", { class: "txt w" }, "No connection and no saved copy.")], [btn("Back", jobs, true)]); }
+    if (r.status === 401) { store.del("xg.token"); return pair(); }
+    if (r.ok && r.status === "ready" || r.card) { c = r.card; store.set(`xg.card.${id}.${LANG}`, JSON.stringify(c)); break; }
+    await new Promise((x) => setTimeout(x, (r.retry_after || 8) * 1000));
+  }
+  if (stop) return;
+  if (!c) return screen("Not ready", [h("div", { class: "txt w" }, "Card still being prepared. Try again in a minute.")], [btn("Back", jobs, true)]);
+  const chunk = (t, max) => { const sents = String(t || "").split(/(?<=[.!?])\s+/).filter(Boolean), out = []; let cur = "";
+    const push = () => { if (cur) { out.push(cur); cur = ""; } };
+    for (let x of sents) { while (x.length > max) { let cut = x.lastIndexOf(" ", max); if (cut < max * 0.4) cut = max; if (cur) push(); out.push(x.slice(0, cut).trim()); x = x.slice(cut).trim(); }
+      if ((cur + " " + x).trim().length > max) push(); cur = (cur + " " + x).trim(); } push(); return out.length ? out : [""]; };
+  const stepPages = c.steps.flatMap((s) => { const parts = chunk(s.detail || s.text, 150); return parts.map((txt, k) => ({ t: "step", s, txt, k, of: parts.length, last: k === parts.length - 1 })); });
+  const pages = [{ t: "overview" }, ...stepPages, ...(c.specs.length ? [{ t: "specs" }] : [])];
+  let p = 0;
+  const show = () => {
+    const pg = pages[p]; let body;
+    const prov = h("div", { class: "prov" }, `${c.provenance.label}${offline ? " · saved copy" : ""}`);
+    if (pg.t === "overview") body = [h("h2", {}, c.vehicle_label), h("div", { class: "txt" }, c.title), h("div", { class: "small" }, `${c.steps.length} steps · ${c.summary.difficulty || "?"} · ${c.tools.length} tools`), h("div", { class: "small" }, c.tools.slice(0, 4).join(" · ")), prov];
+    else if (pg.t === "step") { const s = pg.s; body = [h("h2", {}, `${s.n}. ${s.title}${pg.of > 1 ? ` (${pg.k + 1}/${pg.of})` : ""}`), h("div", { class: "txt" }, pg.txt),
+      pg.last && s.torque ? h("div", {}, h("span", { class: "chip warn" }, s.torque.value ? `Torque ${s.torque.value} (AI)` : "Torque: see manual")) : null,
+      pg.last && s.warn ? h("div", { class: "tip", style: "color:#ffb020" }, "⚠ " + s.warn) : pg.last && s.tip ? h("div", { class: "tip" }, "Tip: " + s.tip) : null, prov]; }
+    else body = [h("h2", {}, "Specs"), h("table", {}, c.specs.slice(0, 5).map((r) => h("tr", {}, h("td", {}, r.item), h("td", { class: "w" }, r.value + (r.docs ? " " + r.docs : ""))))), h("div", { class: "prov" }, c.specs_provenance)];
+    const sayText = pg.t === "step" ? `${pg.s.title}. ${pg.txt}` : pg.t === "overview" ? `${c.vehicle_label}. ${c.title}.` : "Specifications. Verify before use.";
+    screen(`${p + 1}/${pages.length}`, body, [
+      btn("◀", () => { p = Math.max(0, p - 1); show(); }),
+      h("button", { type: "button", "data-first": "1", on: { click: () => { p = Math.min(pages.length - 1, p + 1); show(); } } }, "Next ▶"),
+      btn("🔊", () => speak(sayText)),
+      btn("Menu", jobs),
+    ]);
+  };
+  show();
+}
+
+// ---------- boot ----------
+try { if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {}); } catch {}
+if (Q.get("gates") === "1") gates(); else home();
+</script>
+</body>
+</html>
