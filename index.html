@@ -39,6 +39,7 @@
 <script>
 "use strict";
 const API = "https://bjcejlagkrtrtxipdcwb.supabase.co/functions/v1/glasses-api";
+const MEDIA = API.replace("glasses-api", "glasses-media");
 const CONFIRM_URL = new URL("confirm.html", location.href).href.replace(/^https?:\/\//, "");
 const Q = new URLSearchParams(location.search);
 const LANG = ["en","fr","cs","es","de","it"].includes(Q.get("lang")) ? Q.get("lang") : "en";
@@ -129,7 +130,7 @@ function home() {
 }
 
 // ---------- GATES (P0) ----------
-const BUILD = "p0-2026-10-29d";
+const BUILD = "p1-2026-10-29e";
 async function gates() {
   backFn = home;
   const rows = []; const res = { build: BUILD, boot: boot.n, install: boot.id };
@@ -215,17 +216,24 @@ async function card(id) {
     for (let x of sents) { while (x.length > max) { let cut = x.lastIndexOf(" ", max); if (cut < max * 0.4) cut = max; if (cur) push(); out.push(x.slice(0, cut).trim()); x = x.slice(cut).trim(); }
       if ((cur + " " + x).trim().length > max) push(); cur = (cur + " " + x).trim(); } push(); return out.length ? out : [""]; };
   const stepPages = c.steps.flatMap((s) => { const parts = chunk(s.detail || s.text, 150); return parts.map((txt, k) => ({ t: "step", s, txt, k, of: parts.length, last: k === parts.length - 1 })); });
-  const pages = [{ t: "overview" }, ...stepPages, ...(c.specs.length ? [{ t: "specs" }] : [])];
+  const imgs = {};
+  await Promise.all(c.steps.map(async (s) => { try { const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), 8000);
+    const r = await fetch(MEDIA, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "step_image", token, job_id: id, n: s.n, lang: LANG }), signal: ctl.signal }); clearTimeout(tm);
+    const j = await r.json(); if (j && j.ok && j.status === "ready" && j.url) imgs[s.n] = j.url; } catch {} }));
+  const withImgs = []; let lastN = -1;
+  for (const pg of stepPages) { if (pg.s.n !== lastN) { lastN = pg.s.n; if (imgs[pg.s.n]) withImgs.push({ t: "img", s: pg.s, url: imgs[pg.s.n] }); } withImgs.push(pg); }
+  const pages = [{ t: "overview" }, ...withImgs, ...(c.specs.length ? [{ t: "specs" }] : [])];
   let p = 0;
   const show = () => {
     const pg = pages[p]; let body;
     const prov = h("div", { class: "prov" }, `${c.provenance.label}${offline ? " · saved copy" : ""}`);
     if (pg.t === "overview") body = [h("h2", {}, c.vehicle_label), h("div", { class: "txt" }, c.title), h("div", { class: "small" }, `${c.steps.length} steps · ${c.summary.difficulty || "?"} · ${c.tools.length} tools`), h("div", { class: "small" }, c.tools.slice(0, 4).join(" · ")), prov];
+    else if (pg.t === "img") body = [h("img", { src: pg.url, alt: "", style: "width:100%;border-radius:12px;display:block" }), h("h2", {}, `${pg.s.n}. ${pg.s.title}`), h("div", { class: "prov" }, "AI illustration · indicative only, not OEM")];
     else if (pg.t === "step") { const s = pg.s; body = [h("h2", {}, `${s.n}. ${s.title}${pg.of > 1 ? ` (${pg.k + 1}/${pg.of})` : ""}`), h("div", { class: "txt" }, pg.txt),
       pg.last && s.torque ? h("div", {}, h("span", { class: "chip warn" }, s.torque.value ? `Torque ${s.torque.value} (AI)` : "Torque: see manual")) : null,
       pg.last && s.warn ? h("div", { class: "tip", style: "color:#ffb020" }, "⚠ " + s.warn) : pg.last && s.tip ? h("div", { class: "tip" }, "Tip: " + s.tip) : null, prov]; }
     else body = [h("h2", {}, "Specs"), h("table", {}, c.specs.slice(0, 5).map((r) => h("tr", {}, h("td", {}, r.item), h("td", { class: "w" }, r.value + (r.docs ? " " + r.docs : ""))))), h("div", { class: "prov" }, c.specs_provenance)];
-    const sayText = pg.t === "step" ? `${pg.s.title}. ${pg.txt}` : pg.t === "overview" ? `${c.vehicle_label}. ${c.title}.` : "Specifications. Verify before use.";
+    const sayText = pg.t === "img" ? pg.s.title : pg.t === "step" ? `${pg.s.title}. ${pg.txt}` : pg.t === "overview" ? `${c.vehicle_label}. ${c.title}.` : "Specifications. Verify before use.";
     screen(`${p + 1}/${pages.length}`, body, [
       btn("◀", () => { p = Math.max(0, p - 1); show(); }),
       h("button", { type: "button", "data-first": "1", on: { click: () => { p = Math.min(pages.length - 1, p + 1); show(); } } }, "Next ▶"),
