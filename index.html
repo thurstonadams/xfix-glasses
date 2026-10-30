@@ -135,7 +135,7 @@ function home() {
 }
 
 // ---------- GATES (P0) ----------
-const BUILD = "p4-2026-10-30i";
+const BUILD = "p5-2026-10-30j";
 async function gates() {
   backFn = home;
   const rows = []; const res = { build: BUILD, boot: boot.n, install: boot.id };
@@ -239,20 +239,24 @@ async function card(id) {
     if (exps[s.n]) withImgs.push({ t: "why", s, e: exps[s.n] });
   }
 
-  const pages = [{ t: "overview" }, ...withImgs, ...(c.specs.length ? [{ t: "specs" }] : [])];
+  const pages = [{ t: "overview" }, ...(c.tools.length ? [{ t: "tools" }] : []), ...withImgs, ...(c.specs.length ? [{ t: "specs" }] : [])];
   let p = 0;
   const show = () => {
     const pg = pages[p]; let body;
     const prov = h("div", { class: "prov" }, `${c.provenance.label}${offline ? " · saved copy" : ""}`);
-    if (pg.t === "overview") body = [h("h2", {}, c.vehicle_label), h("div", { class: "txt" }, c.title), h("div", { class: "small" }, `${c.steps.length} steps · ${c.summary.difficulty || "?"} · ${c.tools.length} tools`), h("div", { class: "small" }, c.tools.slice(0, 4).join(" · ")), prov];
+    if (pg.t === "overview") body = [imgs[1] ? h("img", { src: imgs[1], alt: "", style: "width:100%;aspect-ratio:560/260;object-fit:cover;background:#1a1a1a;border-radius:12px;display:block;flex:none" }) : null,
+      h("div", { class: "small" }, c.vehicle_label), h("div", { style: "font-size:44px;line-height:1.1;font-weight:800" }, c.title),
+      h("div", { style: "display:flex;gap:18px;font-size:26px;color:#cfd6dc" }, h("span", {}, `${c.steps.length} steps`), c.summary.difficulty ? h("span", {}, c.summary.difficulty) : null, h("span", {}, `${c.tools.length} tools`)),
+      h("div", { class: "prov", style: "margin-top:auto" }, `${c.provenance.label}${offline ? " · saved copy" : ""}`)];
+    else if (pg.t === "tools") body = [h("h2", {}, "Tools"), ...c.tools.slice(0, 7).map((t) => h("div", { style: "font-size:24px;line-height:1.3;border-bottom:1px solid #222;padding:4px 0" }, "☐ " + String(t).replace(/\s*-([A-Z0-9/]+)-\s*$/, " ($1)"))), c.tools.length > 7 ? h("div", { class: "small" }, `+${c.tools.length - 7} more`) : null];
     else if (pg.t === "hero") body = [pg.url ? h("div", { style: "position:relative;flex:none" }, h("img", { src: pg.url, alt: "", style: "width:100%;aspect-ratio:560/305;object-fit:cover;background:#1a1a1a;border-radius:12px;display:block" }), h("span", { style: "position:absolute;right:8px;bottom:8px;font-size:18px;background:rgba(0,0,0,.65);color:#cfd6dc;padding:2px 8px;border-radius:8px" }, "AI picture")) : null, h("div", { style: `font-size:${pg.url ? 34 : 44}px;line-height:1.15;font-weight:700` }, pg.act)];
     else if (pg.t === "step") body = [h("div", { class: "small" }, pg.s.title), h("div", { class: "txt" }, pg.txt)];
     else if (pg.t === "alert") { const s = pg.s; body = [s.torque ? h("div", { style: "font-size:30px;color:#4cc3ff" }, "Tighten to") : null, s.torque ? h("div", { style: `font-size:${s.torque.value ? 84 : 44}px;font-weight:800;color:#ffb020;line-height:1.1` }, s.torque.value || "Check the manual") : null, s.torque ? h("div", { class: "small" }, s.torque.value ? "AI-read value · verify" : "No value confirmed") : null, s.warn ? h("div", { style: "font-size:32px;line-height:1.2;color:#ffb020" }, "⚠ " + s.warn) : null, s.tip ? h("div", { class: "tip" }, "Tip: " + s.tip) : null]; }
     else if (pg.t === "why") body = [h("div", { class: "small" }, "From the manual"), h("div", { class: "txt" }, pg.e.why), h("div", { class: "small" }, `${pg.e.source.file} · p.${pg.e.source.page}`), pg.e.scope === "model" ? null : h("div", { class: "small", style: "color:#ffb020" }, pg.e.vehicle_note)];
     else body = [h("h2", {}, "Specs"), h("table", {}, c.specs.slice(0, 5).map((r) => h("tr", {}, h("td", {}, r.item), h("td", { class: "w" }, r.value + (r.docs ? " " + r.docs : ""))))), h("div", { class: "prov" }, c.specs_provenance)];
-    const sayText = pg.t === "hero" ? pg.act : pg.t === "why" ? pg.e.why : pg.t === "step" ? pg.txt : pg.t === "alert" ? [pg.s.torque && pg.s.torque.value ? "Tighten to " + pg.s.torque.value : pg.s.torque ? "Check the manual for torque" : "", pg.s.warn || pg.s.tip || ""].filter(Boolean).join(". ") : pg.t === "overview" ? `${c.vehicle_label}. ${c.title}.` : "Specifications. Verify before use.";
+    const sayText = pg.t === "hero" ? pg.act : pg.t === "why" ? pg.e.why : pg.t === "step" ? pg.txt : pg.t === "alert" ? [pg.s.torque && pg.s.torque.value ? "Tighten to " + pg.s.torque.value : pg.s.torque ? "Check the manual for torque" : "", pg.s.warn || pg.s.tip || ""].filter(Boolean).join(". ") : pg.t === "overview" ? `${c.vehicle_label}. ${c.title}. ${c.steps.length} steps.` : pg.t === "tools" ? "Tools. " + c.tools.join(". ") : "Specifications. Verify before use.";
     screen.keep = true; viewerKeys = (e) => { if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); if (p < pages.length - 1) { p++; show(); } return true; } if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); if (p > 0) { p--; show(); } return true; } return false; };
-    screen(pg.s ? dots(pg.s.n, c.steps.length) : pg.t === "overview" ? "Overview" : "Specs", body, [
+    screen(pg.s ? dots(pg.s.n, c.steps.length) : pg.t === "overview" ? "" : pg.t === "tools" ? "Before you start" : "Specs", body, pg.t === "overview" ? [h("button", { type: "button", "data-first": "1", on: { click: () => { p = Math.min(pages.length - 1, p + 1); show(); } } }, "Start ›"), btn("Menu", jobs)] : [
       btn("‹", () => { p = Math.max(0, p - 1); show(); }),
       h("button", { type: "button", "data-first": "1", on: { click: () => { p = Math.min(pages.length - 1, p + 1); show(); } } }, "Next ›"),
       btn("Read", () => speak(sayText)),
