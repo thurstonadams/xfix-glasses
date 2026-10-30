@@ -130,7 +130,7 @@ function home() {
 }
 
 // ---------- GATES (P0) ----------
-const BUILD = "p2-2026-10-29g";
+const BUILD = "p3-2026-10-29h";
 async function gates() {
   backFn = home;
   const rows = []; const res = { build: BUILD, boot: boot.n, install: boot.id };
@@ -230,14 +230,14 @@ async function card(id) {
     const pg = pages[p]; let body;
     const prov = h("div", { class: "prov" }, `${c.provenance.label}${offline ? " · saved copy" : ""}`);
     if (pg.t === "overview") body = [h("h2", {}, c.vehicle_label), h("div", { class: "txt" }, c.title), h("div", { class: "small" }, `${c.steps.length} steps · ${c.summary.difficulty || "?"} · ${c.tools.length} tools`), h("div", { class: "small" }, c.tools.slice(0, 4).join(" · ")), prov];
-    else if (pg.t === "why") { const e = pg.e; body = [h("h2", {}, `Why? ${pg.s.n}. ${pg.s.title}`), h("div", { class: "txt" }, e.why), h("div", { class: "small" }, `${e.source.file} p.${e.source.page}`), h("div", { class: "small", style: "color:#ffb020" }, e.vehicle_note), h("div", { class: "prov" }, "AI summary of OEM manual text · needs review")]; }
-    else if (pg.t === "img") body = [h("img", { src: pg.url, alt: "", style: "width:100%;aspect-ratio:560/305;object-fit:cover;background:#1a1a1a;border-radius:12px;display:block;flex:none" }), h("h2", {}, `${pg.s.n}. ${pg.s.title}`), h("div", { class: "prov" }, "AI illustration · indicative only, not OEM")];
+    else if (pg.t === "why") { const e = pg.e; body = [h("h2", {}, "From the manual"), h("div", { class: "txt" }, e.why), h("div", { class: "small" }, `${e.source.file} · p.${e.source.page}`), e.scope === "model" ? null : h("div", { class: "small", style: "color:#ffb020" }, e.vehicle_note)]; }
+    else if (pg.t === "img") body = [h("img", { src: pg.url, alt: "", style: "width:100%;aspect-ratio:560/305;object-fit:cover;background:#1a1a1a;border-radius:12px;display:block;flex:none" }), h("h2", {}, `${pg.s.n}. ${pg.s.title}`), h("div", { class: "small" }, "AI illustration")];
     else if (pg.t === "step") { const s = pg.s; body = [h("h2", {}, `${s.n}. ${s.title}${pg.of > 1 ? ` (${pg.k + 1}/${pg.of})` : ""}`), h("div", { class: "txt" }, pg.txt),
       pg.last && s.torque ? h("div", {}, h("span", { class: "chip warn" }, s.torque.value ? `Torque ${s.torque.value} (AI)` : "Torque: see manual")) : null,
-      pg.last && s.warn ? h("div", { class: "tip", style: "color:#ffb020" }, "⚠ " + s.warn) : pg.last && s.tip ? h("div", { class: "tip" }, "Tip: " + s.tip) : null, prov]; }
+      pg.last && s.warn ? h("div", { class: "tip", style: "color:#ffb020" }, "⚠ " + s.warn) : pg.last && s.tip ? h("div", { class: "tip" }, "Tip: " + s.tip) : null]; }
     else body = [h("h2", {}, "Specs"), h("table", {}, c.specs.slice(0, 5).map((r) => h("tr", {}, h("td", {}, r.item), h("td", { class: "w" }, r.value + (r.docs ? " " + r.docs : ""))))), h("div", { class: "prov" }, c.specs_provenance)];
     const sayText = pg.t === "why" ? pg.e.why : pg.t === "img" ? pg.s.title : pg.t === "step" ? `${pg.s.title}. ${pg.txt}` : pg.t === "overview" ? `${c.vehicle_label}. ${c.title}.` : "Specifications. Verify before use.";
-    screen(`${p + 1}/${pages.length}`, body, [
+    screen(pg.s ? `Step ${pg.s.n} of ${c.steps.length}` : pg.t === "overview" ? "Overview" : "Specs", body, [
       btn("◀", () => { p = Math.max(0, p - 1); show(); }),
       h("button", { type: "button", "data-first": "1", on: { click: () => { p = Math.min(pages.length - 1, p + 1); show(); } } }, "Next ▶"),
       btn("🔊", () => speak(sayText)),
