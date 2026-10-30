@@ -128,7 +128,7 @@ function home() {
 }
 
 // ---------- GATES (P0) ----------
-const BUILD = "p0-2026-10-29b";
+const BUILD = "p0-2026-10-29c";
 async function gates() {
   backFn = home;
   const rows = []; const res = { build: BUILD, boot: boot.n, install: boot.id };
@@ -165,17 +165,24 @@ async function pair() {
   screen("Pairing", [h("div", { class: "txt" }, "Contacting xFix…")], [btn("Back", backFn, true)]);
   let s; try { s = await api("pair_start", { label: `glasses-${boot.id}` }); } catch { s = null; }
   if (!s || !s.ok) { screen("Pairing", [h("div", { class: "txt bad" }, `Failed (${s ? s.status : "network"})`)], [btn("Retry", pair, true), btn("Back", home)]); return; }
-  screen("Pairing", [h("div", { class: "code" }, s.code), h("div", { class: "small" }, `On your phone open`), h("div", { class: "tip" }, CONFIRM_URL), h("div", { class: "small" }, "enter this code and the pilot PIN.")], [btn("Cancel", backFn, true)]);
+  const done = (tok) => { const saved = store.set("xg.token", tok); screen("Paired ✓", [h("div", { class: "txt" }, saved ? "Token saved." : "Token NOT saved — storage blocked.")], [btn("Jobs", jobs, true)]); };
+  let finished = false, errs = 0, last = "waiting";
+  const check = async () => {
+    if (finished || stop) return;
+    let p; try { p = await api("pair_status", { poll_id: s.poll_id }, 8000); } catch (e) { errs++; last = "net-err"; return; }
+    last = String(p.status);
+    if (p.status === "paired" && p.token) { finished = true; done(p.token); }
+    else if (p.status === "expired") { finished = true; screen("Pairing", [h("div", { class: "txt w" }, "Code expired.")], [btn("Try again", pair, true), btn("Back", home)]); }
+  };
+  const wake = () => { if (document.visibilityState === "visible") check(); };
+  document.addEventListener("visibilitychange", wake); window.addEventListener("focus", wake);
+  const manual = async () => { await check(); if (!finished && !stop) { const el = document.querySelector(".small.st"); if (el) el.textContent = `Not yet · ${last}${errs ? " · net errors " + errs : ""}`; } };
+  screen("Pairing", [h("div", { class: "code" }, s.code), h("div", { class: "small" }, `On your phone open`), h("div", { class: "tip" }, CONFIRM_URL), h("div", { class: "small" }, "enter this code and the pilot PIN."), h("div", { class: "small st" }, "After confirming, press Check now.")], [btn("Check now", manual, true), btn("Cancel", backFn)]);
   const t0 = Date.now();
-  while (!stop && Date.now() - t0 < s.ttl_s * 1000) {
-    await new Promise((r) => setTimeout(r, 3000)); if (stop) return;
-    let p; try { p = await api("pair_status", { poll_id: s.poll_id }, 8000); } catch { continue; }
-    if (p.status === "paired" && p.token) { const saved = store.set("xg.token", p.token); screen("Paired ✓", [h("div", { class: "txt" }, saved ? "Token saved." : "Token NOT saved — storage blocked.")], [btn("Jobs", jobs, true)]); return; }
-    if (p.status === "expired") break;
-  }
-  if (!stop) screen("Pairing", [h("div", { class: "txt w" }, "Code expired.")], [btn("Try again", pair, true), btn("Back", home)]);
+  while (!stop && !finished && Date.now() - t0 < s.ttl_s * 1000) { await new Promise((r) => setTimeout(r, 2000)); await check(); }
+  document.removeEventListener("visibilitychange", wake); window.removeEventListener("focus", wake);
+  if (!stop && !finished) screen("Pairing", [h("div", { class: "txt w" }, "Code expired.")], [btn("Try again", pair, true), btn("Back", home)]);
 }
-
 // ---------- JOBS ----------
 async function jobs() {
   backFn = home; const token = store.get("xg.token");
