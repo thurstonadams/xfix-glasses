@@ -26,6 +26,9 @@
   button { font:inherit; font-size:26px; color:var(--fg); background:#15191d; border:2px solid #3a434b; border-radius:12px;
     padding:8px 14px; min-height:54px; flex:1; }
   button:focus, button.focus { outline:4px solid var(--acc); outline-offset:1px; background:#0b2a3b; }
+  *:focus:not(button):not(input) { outline:none; }
+  .bar.slim button { min-height:44px; font-size:22px; padding:4px 10px; opacity:.7; }
+  .bar.slim button:focus { opacity:1; }
   .list button { display:block; width:100%; text-align:left; margin-bottom:8px; }
   .code { font-size:84px; letter-spacing:.12em; font-weight:800; color:var(--acc); text-align:center; font-family: ui-monospace, Menlo, Consolas, monospace; }
   table { border-collapse:collapse; width:100%; font-size:22px; }
@@ -79,12 +82,13 @@ function h(tag, attrs = {}, ...kids) {
   for (const k of kids.flat()) if (k != null) e.append(k.nodeType ? k : document.createTextNode(String(k)));
   return e;
 }
-let backFn = null;
+let backFn = null; let viewerKeys = null;
 function screen(title, body, bar, sub) {
+  const keep = screen.keep; screen.keep = false; if (!keep) viewerKeys = null;
   $app.replaceChildren(
     h("div", {}, h("h1", {}, title), sub ? h("div", { class: "sub" }, sub) : null),
     h("div", { class: "body" }, body),
-    bar ? h("div", { class: "bar" }, bar) : null,
+    bar ? h("div", { class: keep ? "bar slim" : "bar" }, bar) : null,
   );
   const first = $app.querySelector("[data-first]") || $app.querySelector("button, input");
   if (first) first.focus({ preventScroll: true });
@@ -96,6 +100,7 @@ const keyLog = [];
 addEventListener("keydown", (e) => {
   keyLog.push(`${e.key}@${Math.round(performance.now())}`); if (keyLog.length > 12) keyLog.shift();
   if (NATIVE_NAV) return;
+  if (viewerKeys && viewerKeys(e)) return;
   const inInput = document.activeElement && document.activeElement.tagName === "INPUT";
   const items = [...$app.querySelectorAll("button, input")];
   const i = items.indexOf(document.activeElement);
@@ -130,7 +135,7 @@ function home() {
 }
 
 // ---------- GATES (P0) ----------
-const BUILD = "p3-2026-10-29h";
+const BUILD = "p4-2026-10-30i";
 async function gates() {
   backFn = home;
   const rows = []; const res = { build: BUILD, boot: boot.n, install: boot.id };
@@ -215,32 +220,42 @@ async function card(id) {
     const push = () => { if (cur) { out.push(cur); cur = ""; } };
     for (let x of sents) { while (x.length > max) { let cut = x.lastIndexOf(" ", max); if (cut < max * 0.4) cut = max; if (cur) push(); out.push(x.slice(0, cut).trim()); x = x.slice(cut).trim(); }
       if ((cur + " " + x).trim().length > max) push(); cur = (cur + " " + x).trim(); } push(); return out.length ? out : [""]; };
-  const stepPages = c.steps.flatMap((s) => { const parts = chunk(s.detail || s.text, 150); return parts.map((txt, k) => ({ t: "step", s, txt, k, of: parts.length, last: k === parts.length - 1 })); });
+  const firstSent = (t) => { const m = String(t || "").match(/^(.+?[.!?])(\s+|$)/); return m ? m[1] : String(t || ""); };
+  const splitStep = (s) => { const full = String(s.detail || s.text || "").trim(), sent = firstSent(full); return sent && sent.length <= 90 ? { act: sent, rest: full.slice(sent.length).trim() } : { act: s.title, rest: full }; };
+  const dots = (n, N) => h("span", { style: "font-size:22px;letter-spacing:6px;color:#4cc3ff" }, "●".repeat(n) + "○".repeat(Math.max(0, N - n)));
+  const stepPages = c.steps.flatMap((s) => { const { rest } = splitStep(s); const parts = rest ? chunk(rest, 150) : []; return parts.map((txt, k) => ({ t: "step", s, txt, k, of: parts.length, last: k === parts.length - 1 })); });
   const imgs = {};
   await Promise.all(c.steps.map(async (s) => { try { const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), 8000);
     const r = await fetch(MEDIA, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "step_image", token, job_id: id, n: s.n, lang: LANG }), signal: ctl.signal }); clearTimeout(tm);
     const j = await r.json(); if (j && j.ok && j.status === "ready" && j.url) imgs[s.n] = j.url; } catch {} }));
   const EXPL = MEDIA.replace("glasses-media", "glasses-explain"); const exps = {};
   await Promise.all(c.steps.map(async (s) => { try { const ctl = new AbortController(); const tm = setTimeout(() => ctl.abort(), 8000); const r = await fetch(EXPL, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: "step_explain", token, job_id: id, n: s.n }), signal: ctl.signal }); clearTimeout(tm); const j = await r.json(); if (j && j.ok && j.status === "ready" && j.data && j.data.supported) exps[s.n] = j.data; } catch {} }));
-  const withImgs = []; let lastN = -1;
-  for (const pg of stepPages) { if (pg.s.n !== lastN) { lastN = pg.s.n; if (imgs[pg.s.n]) withImgs.push({ t: "img", s: pg.s, url: imgs[pg.s.n] }); } withImgs.push(pg); if (pg.last && exps[pg.s.n]) withImgs.push({ t: "why", s: pg.s, e: exps[pg.s.n] }); }
+  const withImgs = [];
+  for (const s of c.steps) {
+    const { act } = splitStep(s); const mine = stepPages.filter((x) => x.s === s);
+    withImgs.push({ t: "hero", s, act, url: imgs[s.n] || null });
+    for (const x of mine) withImgs.push(x);
+    if (s.warn || s.torque || (s.tip && !mine.length)) withImgs.push({ t: "alert", s });
+    if (exps[s.n]) withImgs.push({ t: "why", s, e: exps[s.n] });
+  }
+
   const pages = [{ t: "overview" }, ...withImgs, ...(c.specs.length ? [{ t: "specs" }] : [])];
   let p = 0;
   const show = () => {
     const pg = pages[p]; let body;
     const prov = h("div", { class: "prov" }, `${c.provenance.label}${offline ? " · saved copy" : ""}`);
     if (pg.t === "overview") body = [h("h2", {}, c.vehicle_label), h("div", { class: "txt" }, c.title), h("div", { class: "small" }, `${c.steps.length} steps · ${c.summary.difficulty || "?"} · ${c.tools.length} tools`), h("div", { class: "small" }, c.tools.slice(0, 4).join(" · ")), prov];
-    else if (pg.t === "why") { const e = pg.e; body = [h("h2", {}, "From the manual"), h("div", { class: "txt" }, e.why), h("div", { class: "small" }, `${e.source.file} · p.${e.source.page}`), e.scope === "model" ? null : h("div", { class: "small", style: "color:#ffb020" }, e.vehicle_note)]; }
-    else if (pg.t === "img") body = [h("img", { src: pg.url, alt: "", style: "width:100%;aspect-ratio:560/305;object-fit:cover;background:#1a1a1a;border-radius:12px;display:block;flex:none" }), h("h2", {}, `${pg.s.n}. ${pg.s.title}`), h("div", { class: "small" }, "AI illustration")];
-    else if (pg.t === "step") { const s = pg.s; body = [h("h2", {}, `${s.n}. ${s.title}${pg.of > 1 ? ` (${pg.k + 1}/${pg.of})` : ""}`), h("div", { class: "txt" }, pg.txt),
-      pg.last && s.torque ? h("div", {}, h("span", { class: "chip warn" }, s.torque.value ? `Torque ${s.torque.value} (AI)` : "Torque: see manual")) : null,
-      pg.last && s.warn ? h("div", { class: "tip", style: "color:#ffb020" }, "⚠ " + s.warn) : pg.last && s.tip ? h("div", { class: "tip" }, "Tip: " + s.tip) : null]; }
+    else if (pg.t === "hero") body = [pg.url ? h("div", { style: "position:relative;flex:none" }, h("img", { src: pg.url, alt: "", style: "width:100%;aspect-ratio:560/305;object-fit:cover;background:#1a1a1a;border-radius:12px;display:block" }), h("span", { style: "position:absolute;right:8px;bottom:8px;font-size:18px;background:rgba(0,0,0,.65);color:#cfd6dc;padding:2px 8px;border-radius:8px" }, "AI picture")) : null, h("div", { style: `font-size:${pg.url ? 34 : 44}px;line-height:1.15;font-weight:700` }, pg.act)];
+    else if (pg.t === "step") body = [h("div", { class: "small" }, pg.s.title), h("div", { class: "txt" }, pg.txt)];
+    else if (pg.t === "alert") { const s = pg.s; body = [s.torque ? h("div", { style: "font-size:30px;color:#4cc3ff" }, "Tighten to") : null, s.torque ? h("div", { style: `font-size:${s.torque.value ? 84 : 44}px;font-weight:800;color:#ffb020;line-height:1.1` }, s.torque.value || "Check the manual") : null, s.torque ? h("div", { class: "small" }, s.torque.value ? "AI-read value · verify" : "No value confirmed") : null, s.warn ? h("div", { style: "font-size:32px;line-height:1.2;color:#ffb020" }, "⚠ " + s.warn) : null, s.tip ? h("div", { class: "tip" }, "Tip: " + s.tip) : null]; }
+    else if (pg.t === "why") body = [h("div", { class: "small" }, "From the manual"), h("div", { class: "txt" }, pg.e.why), h("div", { class: "small" }, `${pg.e.source.file} · p.${pg.e.source.page}`), pg.e.scope === "model" ? null : h("div", { class: "small", style: "color:#ffb020" }, pg.e.vehicle_note)];
     else body = [h("h2", {}, "Specs"), h("table", {}, c.specs.slice(0, 5).map((r) => h("tr", {}, h("td", {}, r.item), h("td", { class: "w" }, r.value + (r.docs ? " " + r.docs : ""))))), h("div", { class: "prov" }, c.specs_provenance)];
-    const sayText = pg.t === "why" ? pg.e.why : pg.t === "img" ? pg.s.title : pg.t === "step" ? `${pg.s.title}. ${pg.txt}` : pg.t === "overview" ? `${c.vehicle_label}. ${c.title}.` : "Specifications. Verify before use.";
-    screen(pg.s ? `Step ${pg.s.n} of ${c.steps.length}` : pg.t === "overview" ? "Overview" : "Specs", body, [
-      btn("◀", () => { p = Math.max(0, p - 1); show(); }),
-      h("button", { type: "button", "data-first": "1", on: { click: () => { p = Math.min(pages.length - 1, p + 1); show(); } } }, "Next ▶"),
-      btn("🔊", () => speak(sayText)),
+    const sayText = pg.t === "hero" ? pg.act : pg.t === "why" ? pg.e.why : pg.t === "step" ? pg.txt : pg.t === "alert" ? [pg.s.torque && pg.s.torque.value ? "Tighten to " + pg.s.torque.value : pg.s.torque ? "Check the manual for torque" : "", pg.s.warn || pg.s.tip || ""].filter(Boolean).join(". ") : pg.t === "overview" ? `${c.vehicle_label}. ${c.title}.` : "Specifications. Verify before use.";
+    screen.keep = true; viewerKeys = (e) => { if (e.key === "ArrowRight" || e.key === "ArrowDown") { e.preventDefault(); if (p < pages.length - 1) { p++; show(); } return true; } if (e.key === "ArrowLeft" || e.key === "ArrowUp") { e.preventDefault(); if (p > 0) { p--; show(); } return true; } return false; };
+    screen(pg.s ? dots(pg.s.n, c.steps.length) : pg.t === "overview" ? "Overview" : "Specs", body, [
+      btn("‹", () => { p = Math.max(0, p - 1); show(); }),
+      h("button", { type: "button", "data-first": "1", on: { click: () => { p = Math.min(pages.length - 1, p + 1); show(); } } }, "Next ›"),
+      btn("Read", () => speak(sayText)),
       btn("Menu", jobs),
     ]);
   };
