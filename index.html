@@ -130,7 +130,7 @@ function home() {
 }
 
 // ---------- GATES (P0) ----------
-const BUILD = "p1-2026-10-29e";
+const BUILD = "p1-2026-10-29f";
 async function gates() {
   backFn = home;
   const rows = []; const res = { build: BUILD, boot: boot.n, install: boot.id };
@@ -228,7 +228,7 @@ async function card(id) {
     const pg = pages[p]; let body;
     const prov = h("div", { class: "prov" }, `${c.provenance.label}${offline ? " · saved copy" : ""}`);
     if (pg.t === "overview") body = [h("h2", {}, c.vehicle_label), h("div", { class: "txt" }, c.title), h("div", { class: "small" }, `${c.steps.length} steps · ${c.summary.difficulty || "?"} · ${c.tools.length} tools`), h("div", { class: "small" }, c.tools.slice(0, 4).join(" · ")), prov];
-    else if (pg.t === "img") body = [h("img", { src: pg.url, alt: "", style: "width:100%;border-radius:12px;display:block" }), h("h2", {}, `${pg.s.n}. ${pg.s.title}`), h("div", { class: "prov" }, "AI illustration · indicative only, not OEM")];
+    else if (pg.t === "img") body = [h("img", { src: pg.url, alt: "", style: "width:100%;aspect-ratio:560/305;object-fit:cover;background:#1a1a1a;border-radius:12px;display:block;flex:none" }), h("h2", {}, `${pg.s.n}. ${pg.s.title}`), h("div", { class: "prov" }, "AI illustration · indicative only, not OEM")];
     else if (pg.t === "step") { const s = pg.s; body = [h("h2", {}, `${s.n}. ${s.title}${pg.of > 1 ? ` (${pg.k + 1}/${pg.of})` : ""}`), h("div", { class: "txt" }, pg.txt),
       pg.last && s.torque ? h("div", {}, h("span", { class: "chip warn" }, s.torque.value ? `Torque ${s.torque.value} (AI)` : "Torque: see manual")) : null,
       pg.last && s.warn ? h("div", { class: "tip", style: "color:#ffb020" }, "⚠ " + s.warn) : pg.last && s.tip ? h("div", { class: "tip" }, "Tip: " + s.tip) : null, prov]; }
